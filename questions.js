@@ -28,7 +28,7 @@ export const DEFAULT_QUESTIONS = [
     answer: "Saint Bernard"
   },
   {
-    q: "What was Taylor Swift\’s first single?",
+    q: "What was Taylor Swift's first single?",
     answer: "Tim McGraw"
   },
   {
@@ -37,6 +37,6 @@ export const DEFAULT_QUESTIONS = [
   },
   {
     q: "What is the capital of the country that hosted the 2016 Summer Olympics?",
-    answer: "Rio de Janeiro"
+    answer: "Brasília"
   }
 ];
