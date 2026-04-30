@@ -16,23 +16,27 @@
 
 export const DEFAULT_QUESTIONS = [
   {
-    q: "What is the capital city of Australia?",
-    answer: "Canberra"
+    q: "What country did Gaddafi have a vendetta against in 2008?",
+    answer: "Switzerland"
   },
   {
-    q: "How many bones are in the adult human body?",
-    answer: "206"
+    q: "Who provided backing vocals on Frank Ocean's \"Pink + White\"?",
+    answer: "Beyonce"
   },
   {
-    q: "Which planet is known as the Red Planet?",
-    answer: "Mars"
+    q: "What dog was bred by monks in a hospice in the Swiss Alps?",
+    answer: "Saint Bernard"
   },
   {
-    q: "Who painted the Mona Lisa?",
-    answer: "Leonardo da Vinci"
+    q: "What was Taylor Swift\’s first single?",
+    answer: "Tim McGraw"
   },
   {
-    q: "What is the chemical symbol for gold?",
-    answer: "Au"
+    q: "What song is widely considered MUNA's biggest hit?",
+    answer: "Silk Chiffon"
+  },
+  {
+    q: "What is the capital of the country that hosted the 2016 Summer Olympics?",
+    answer: "Rio de Janeiro"
   }
 ];
