@@ -19,17 +19,15 @@
   import { initializeApp }                              from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import { getDatabase, ref, set, get, push, onValue, remove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
-  // ↓↓↓ PASTE YOUR FIREBASE CONFIG HERE ↓↓↓
   const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-    databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_PROJECT_ID.appspot.com",
-    messagingSenderId: "YOUR_SENDER_ID",
-    appId: "YOUR_APP_ID"
+    apiKey: "AIzaSyAoFGTy7v9NRZeHmRsySvXEwC1tgtgcoC0",
+    authDomain: "trivia-champs.firebaseapp.com",
+    projectId: "trivia-champs",
+    storageBucket: "trivia-champs.firebasestorage.app",
+    messagingSenderId: "699849865698",
+    appId: "1:699849865698:web:613b2aa76f5f916e89a1bb",
+    measurementId: "G-08PMGM6GLX"
   };
-  // ↑↑↑ PASTE YOUR FIREBASE CONFIG HERE ↑↑↑
 
   const app = initializeApp(firebaseConfig);
   const db  = getDatabase(app);
