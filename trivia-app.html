@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quiz Time</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<!-- ============================================================
+  FIREBASE SETUP
+  1. Go to https://console.firebase.google.com
+  2. Create a new project
+  3. Click "Add app" > Web
+  4. Copy your config and paste it below, replacing the placeholder values
+  5. In Firebase console: go to Realtime Database > Create database
+     - Choose your region, start in TEST MODE (you can add security rules later)
+  ============================================================ -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getDatabase, ref, set, get, push, onValue, remove } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+  // ↓↓↓ REPLACE THIS WITH YOUR FIREBASE CONFIG ↓↓↓
+  const firebaseConfig = {
+    apiKey: "AIzaSyAoFGTy7v9NRZeHmRsySvXEwC1tgtgcoC0",
+    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+    databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID"
+  };
+  // ↑↑↑ REPLACE THIS WITH YOUR FIREBASE CONFIG ↑↑↑
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+
+  // ---- Default questions (used only on first-ever load) ----
+  const DEFAULT_QUESTIONS = [
+    {
+      q: "What is the capital city of Australia?",
+      opts: ["Sydney", "Melbourne", "Canberra", "Brisbane"],
+      correct: 2
+    },
+    {
+      q: "How many bones are in the adult human body?",
+      opts: ["196", "206", "216", "226"],
+      correct: 1
+    },
+    {
+      q: "Which planet is known as the Red Planet?",
+      opts: ["Venus", "Jupiter", "Saturn", "Mars"],
+      correct: 3
+    },
+    {
+      q: "Who painted the Mona Lisa?",
+      opts: ["Michelangelo", "Raphael", "Leonardo da Vinci", "Donatello"],
+      correct: 2
+    },
+    {
+      q: "What is the chemical symbol for gold?",
+      opts: ["Go", "Gd", "Au", "Ag"],
+      correct: 2
+    }
+  ];
+
+  // ---- App state ----
+  let questions = JSON.parse(JSON.stringify(DEFAULT_QUESTIONS));
+  let leaderboard = [];
+  let currentQ = 0;
+  let score = 0;
+  let username = "";
+  let answered = false;
+
+  // ---- Firebase helpers ----
+  async function loadQuestions() {
+    try {
+      const snap = await get(ref(db, "questions"));
+      if (snap.exists()) {
+        questions = snap.val();
+      } else {
+        // First time: seed defaults
+        await set(ref(db, "questions"), DEFAULT_QUESTIONS);
+      }
+    } catch (e) {
+      console.warn("Could not load questions from Firebase:", e);
+    }
+  }
+
+  async function saveQuestionsToFirebase(qs) {
+    await set(ref(db, "questions"), qs);
+  }
+
+  function listenLeaderboard() {
+    onValue(ref(db, "leaderboard"), (snap) => {
+      if (snap.exists()) {
+        const raw = snap.val();
+        leaderboard = Object.values(raw);
+        leaderboard.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+      } else {
+        leaderboard = [];
+      }
+      if (document.getElementById("screen-leaderboard").classList.contains("active")) {
+        renderLeaderboard();
+      }
+    });
+  }
+
+  async function addToLeaderboard(entry) {
+    await push(ref(db, "leaderboard"), entry);
+  }
+
+  async function clearLeaderboardInFirebase() {
+    await remove(ref(db, "leaderboard"));
+  }
+
+  // ---- UI helpers ----
+  function showScreen(id) {
+    document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+    document.getElementById("screen-" + id).classList.add("active");
+    if (id === "leaderboard") renderLeaderboard();
+    if (id === "admin") renderAdmin();
+  }
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  // ---- Quiz ----
+  function startQuiz() {
+    username = document.getElementById("username-input").value.trim();
+    if (!username) { alert("Please enter a username first!"); return; }
+    currentQ = 0; score = 0; answered = false;
+    showScreen("quiz");
+    loadQuestion();
+  }
+
+  function loadQuestion() {
+    answered = false;
+    const q = questions[currentQ];
+    document.getElementById("q-counter").textContent = `Q${currentQ + 1} / ${questions.length}`;
+    document.getElementById("q-text").textContent = q.q;
+    document.getElementById("quiz-user").textContent = username;
+    document.getElementById("progress-bar").style.width = `${(currentQ / questions.length) * 100}%`;
+    document.getElementById("next-btn").style.display = "none";
+    document.getElementById("feedback-msg").className = "feedback-msg";
+
+    const letters = ["A", "B", "C", "D"];
+    const ol = document.getElementById("options-list");
+    ol.innerHTML = q.opts.map((o, i) =>
+      `<div class="opt" id="opt-${i}" onclick="window._selectAnswer(${i})">
+        <span class="opt-letter">${letters[i]}</span>
+        <span>${escHtml(o)}</span>
+      </div>`
+    ).join("");
+  }
+
+  function selectAnswer(idx) {
+    if (answered) return;
+    answered = true;
+    const q = questions[currentQ];
+    const fb = document.getElementById("feedback-msg");
+    document.querySelectorAll(".opt").forEach(o => o.classList.add("disabled"));
+    document.getElementById(`opt-${q.correct}`)?.classList.add("correct");
+
+    if (idx === q.correct) {
+      score++;
+      fb.textContent = "Correct!";
+      fb.className = "feedback-msg correct";
+    } else {
+      if (idx >= 0) document.getElementById(`opt-${idx}`)?.classList.add("wrong");
+      fb.textContent = `Wrong! The answer was: ${q.opts[q.correct]}`;
+      fb.className = "feedback-msg wrong";
+    }
+
+    if (currentQ < questions.length - 1) {
+      document.getElementById("next-btn").style.display = "flex";
+    } else {
+      setTimeout(() => showResultsScreen(), 1000);
+    }
+  }
+
+  function nextQuestion() {
+    currentQ++;
+    if (currentQ < questions.length) loadQuestion();
+    else showResultsScreen();
+  }
+
+  async function showResultsScreen() {
+    document.getElementById("res-score").textContent = score;
+    document.getElementById("res-total").textContent = questions.length;
+    const grades = [
+      [questions.length, "🏆 Perfect score! Brilliant!"],
+      [Math.ceil(questions.length * 0.8), "⭐ Excellent work!"],
+      [Math.ceil(questions.length * 0.6), "👍 Good effort!"],
+      [Math.ceil(questions.length * 0.4), "📚 Keep studying!"],
+      [0, "💪 Better luck next time!"]
+    ];
+    document.getElementById("res-grade").textContent = grades.find(g => score >= g[0])[1];
+    const entry = { name: username, score, total: questions.length, date: new Date().toLocaleDateString() };
+    try { await addToLeaderboard(entry); } catch (e) { console.warn("Could not save score:", e); }
+    showScreen("results");
+  }
+
+  // ---- Leaderboard ----
+  function renderLeaderboard() {
+    const el = document.getElementById("lb-list");
+    if (!leaderboard.length) {
+      el.innerHTML = '<p class="muted center">No scores yet. Be the first!</p>';
+      return;
+    }
+    const medals = ["🥇", "🥈", "🥉"];
+    const rankClass = ["gold", "silver", "bronze"];
+    el.innerHTML = leaderboard.slice(0, 20).map((e, i) => `
+      <div class="lb-row">
+        <span class="lb-rank ${rankClass[i] || ''}">${medals[i] || "#" + (i + 1)}</span>
+        <span class="lb-name">${escHtml(e.name)}${e.name === username ? '<span class="lb-you">you</span>' : ''}</span>
+        <span class="lb-score">${e.score} / ${e.total}</span>
+        <span class="lb-date">${e.date}</span>
+      </div>`).join("");
+  }
+
+  // ---- Admin ----
+  function renderAdmin() {
+    const el = document.getElementById("admin-q-list");
+    if (!el) return;
+    el.innerHTML = questions.map((q, qi) => `
+      <div class="q-edit-block">
+        <div class="q-num">Question ${qi + 1}</div>
+        <div class="q-edit-label">Question text</div>
+        <input type="text" id="aq-${qi}" value="${escHtml(q.q)}" placeholder="Enter your question...">
+        <div class="q-edit-label" style="margin-top:12px">Answer options — click ✓ to mark the correct one</div>
+        <div class="ans-row">
+          ${q.opts.map((o, oi) => `
+            <div class="ans-input-wrap">
+              <input type="text" id="ao-${qi}-${oi}" value="${escHtml(o)}" placeholder="Option ${String.fromCharCode(65 + oi)}">
+              <span class="ans-correct-mark" onclick="window._markCorrect(${qi},${oi})" title="Mark as correct"
+                style="color:${q.correct === oi ? 'var(--green)' : 'var(--muted)'}">✓</span>
+            </div>`).join("")}
+        </div>
+      </div>`).join("");
+  }
+
+  function markCorrect(qi, oi) {
+    questions[qi].correct = oi;
+    renderAdmin();
+  }
+
+  async function saveQuestions() {
+    const updated = questions.map((q, qi) => ({
+      q: document.getElementById(`aq-${qi}`).value.trim() || q.q,
+      opts: q.opts.map((_, oi) => document.getElementById(`ao-${qi}-${oi}`).value.trim() || q.opts[oi]),
+      correct: q.correct
+    }));
+    questions = updated;
+    try {
+      await saveQuestionsToFirebase(questions);
+      const note = document.getElementById("save-note");
+      note.style.display = "block";
+      setTimeout(() => note.style.display = "none", 2500);
+    } catch (e) {
+      alert("Error saving to Firebase. Check your config.");
+      console.error(e);
+    }
+    renderAdmin();
+  }
+
+  async function clearLeaderboard() {
+    if (!confirm("Clear ALL leaderboard scores? This cannot be undone.")) return;
+    try {
+      await clearLeaderboardInFirebase();
+      leaderboard = [];
+      renderLeaderboard();
+      alert("Leaderboard cleared.");
+    } catch (e) {
+      alert("Error clearing leaderboard.");
+    }
+  }
+
+  function resetToHome() {
+    showScreen("home");
+  }
+
+  // ---- Expose to window for inline onclick handlers ----
+  window._selectAnswer = selectAnswer;
+  window._nextQuestion = nextQuestion;
+  window._markCorrect = markCorrect;
+  window._startQuiz = startQuiz;
+  window._saveQuestions = saveQuestions;
+  window._clearLeaderboard = clearLeaderboard;
+  window._resetToHome = resetToHome;
+  window._showScreen = showScreen;
+  window._showAdmin = () => showScreen("admin");
+
+  // ---- Bootstrap ----
+  await loadQuestions();
+  listenLeaderboard();
+</script>
+
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0d0d12;
+    --surface: #16161f;
+    --surface2: #1e1e2a;
+    --border: #2a2a3a;
+    --accent: #7c6af7;
+    --accent2: #f7c46a;
+    --text: #e8e8f0;
+    --muted: #8888aa;
+    --green: #4ecb8a;
+    --red: #f76a6a;
+    --radius: 14px;
+  }
+
+  body {
+    font-family: 'Syne', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 40px 20px 60px;
+  }
+
+  .app { width: 100%; max-width: 560px; }
+
+  /* Screens */
+  .screen { display: none; animation: fadeUp .35s ease; }
+  .screen.active { display: block; }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Typography */
+  h1 { font-size: 2.8rem; font-weight: 800; letter-spacing: -1.5px; line-height: 1.05; margin-bottom: 10px; }
+  h2 { font-size: 1.5rem; font-weight: 700; }
+  .mono { font-family: 'DM Mono', monospace; }
+
+  /* Card */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px;
+  }
+
+  /* Inputs */
+  input[type="text"] {
+    width: 100%;
+    padding: 14px 16px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    font-size: 1rem;
+    outline: none;
+    transition: border .2s;
+  }
+  input[type="text"]:focus { border-color: var(--accent); }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 13px 24px;
+    border-radius: 10px;
+    font-family: 'Syne', sans-serif;
+    font-size: .95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .18s;
+    border: none;
+    width: 100%;
+    margin-top: 12px;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #9080ff; transform: translateY(-1px); }
+  .btn-primary:active { transform: translateY(0); }
+  .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  .btn-ghost:hover { background: var(--surface2); color: var(--text); }
+  .btn-sm { padding: 8px 16px; font-size: .85rem; width: auto; margin-top: 0; }
+  .btn-danger { background: transparent; color: var(--red); border: 1px solid var(--border); }
+  .btn-danger:hover { background: #1f0d0d; border-color: var(--red); }
+
+  /* Home */
+  .logo-dot {
+    display: inline-block;
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .tagline { color: var(--muted); font-size: .95rem; margin-bottom: 28px; line-height: 1.6; }
+  .label { font-size: .75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; }
+
+  /* Progress */
+  .progress-bar-wrap { height: 3px; background: var(--surface2); border-radius: 99px; margin-bottom: 24px; overflow: hidden; }
+  .progress-bar-fill { height: 100%; background: var(--accent); border-radius: 99px; transition: width .4s ease; }
+
+  /* Quiz header */
+  .q-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .q-badge {
+    font-family: 'DM Mono', monospace;
+    font-size: .78rem;
+    color: var(--muted);
+    background: var(--surface2);
+    padding: 4px 10px;
+    border-radius: 6px;
+  }
+  .q-text { font-size: 1.2rem; font-weight: 600; line-height: 1.5; margin-bottom: 24px; }
+
+  /* Options */
+  .options { display: grid; gap: 10px; }
+  .opt {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    background: var(--surface2);
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: .95rem;
+    font-weight: 500;
+    transition: all .2s;
+    text-align: left;
+  }
+  .opt:hover:not(.disabled) { border-color: var(--accent); background: #1c1c2e; }
+  .opt.correct  { border-color: var(--green) !important; background: #0d2318 !important; color: var(--green); }
+  .opt.wrong    { border-color: var(--red)   !important; background: #1f0d0d !important; color: var(--red); }
+  .opt.disabled { cursor: default; }
+  .opt-letter   { font-family: 'DM Mono', monospace; font-size: .75rem; color: var(--muted); min-width: 18px; }
+  .opt.correct .opt-letter { color: var(--green); }
+  .opt.wrong   .opt-letter { color: var(--red); }
+
+  /* Feedback */
+  .feedback-msg { padding: 10px 14px; border-radius: 8px; font-size: .9rem; margin-top: 14px; display: none; }
+  .feedback-msg.correct { background: #0d2318; color: var(--green); display: block; }
+  .feedback-msg.wrong   { background: #1f0d0d; color: var(--red);   display: block; }
+
+  /* Results */
+  .score-circle {
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    border: 3px solid var(--accent);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    margin: 0 auto 24px;
+    background: var(--surface2);
+  }
+  .score-num   { font-size: 2.4rem; font-weight: 800; color: var(--accent); line-height: 1; }
+  .score-denom { font-size: .85rem; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 2px; }
+  .score-grade { font-size: 1.1rem; font-weight: 700; margin-bottom: 28px; text-align: center; color: var(--accent2); }
+
+  /* Leaderboard */
+  .lb-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .lb-row:last-child { border-bottom: none; }
+  .lb-rank   { font-family: 'DM Mono', monospace; font-size: .85rem; color: var(--muted); min-width: 28px; font-weight: 500; }
+  .lb-rank.gold   { color: var(--accent2); }
+  .lb-rank.silver { color: #aaaacc; }
+  .lb-rank.bronze { color: #c9804a; }
+  .lb-name   { flex: 1; font-weight: 600; font-size: .95rem; }
+  .lb-score  { font-family: 'DM Mono', monospace; font-size: .9rem; color: var(--accent); font-weight: 500; }
+  .lb-date   { font-size: .75rem; color: var(--muted); min-width: 60px; text-align: right; }
+  .lb-you    { font-size: .7rem; background: var(--accent); color: #fff; padding: 2px 7px; border-radius: 4px; margin-left: 6px; }
+
+  /* Admin */
+  .q-edit-block { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-bottom: 14px; }
+  .q-edit-block input { background: var(--bg); font-size: .88rem; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--border); color: var(--text); font-family: 'Syne', sans-serif; }
+  .q-edit-block input:focus { border-color: var(--accent); }
+  .q-edit-label { font-size: .72rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: 10px; }
+  .q-edit-label:first-child { margin-top: 0; }
+  .q-num { font-size: .8rem; font-weight: 700; color: var(--accent); margin-bottom: 10px; }
+  .ans-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  .ans-input-wrap { position: relative; }
+  .ans-input-wrap input { padding-right: 32px; }
+  .ans-correct-mark { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); cursor: pointer; font-size: .9rem; user-select: none; }
+  .save-note { font-size: .85rem; color: var(--green); margin-top: 8px; display: none; }
+
+  /* Misc */
+  .divider { height: 1px; background: var(--border); margin: 20px 0; }
+  .muted   { color: var(--muted); font-size: .88rem; }
+  .center  { text-align: center; }
+  .nav-row { display: flex; gap: 8px; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .spacer  { margin-top: 14px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ========== HOME ========== -->
+  <div class="screen active" id="screen-home">
+    <div style="margin-bottom:32px">
+      <div style="font-size:.8rem;font-weight:600;color:var(--accent);letter-spacing:.14em;text-transform:uppercase;margin-bottom:14px">
+        <span class="logo-dot"></span>Quiz Time
+      </div>
+      <h1>Think<br>Fast.</h1>
+      <p class="tagline">5 questions. One point each.<br>Climb the leaderboard.</p>
+    </div>
+    <div class="card">
+      <div class="label">Your username</div>
+      <input type="text" id="username-input" placeholder="e.g. QuizMaster99" maxlength="20"
+        onkeydown="if(event.key==='Enter') window._startQuiz()">
+      <button class="btn btn-primary" onclick="window._startQuiz()">Start Quiz →</button>
+      <button class="btn btn-ghost" onclick="window._showScreen('leaderboard')">View Leaderboard</button>
+      <div class="divider"></div>
+      <button class="btn btn-ghost btn-sm" onclick="window._showAdmin()">⚙ Edit Questions</button>
+    </div>
+  </div>
+
+  <!-- ========== QUIZ ========== -->
+  <div class="screen" id="screen-quiz">
+    <div class="nav-row" style="margin-bottom:16px">
+      <span id="quiz-user" class="muted mono" style="font-size:.85rem"></span>
+      <span id="q-counter" class="q-badge">Q1 / 5</span>
+    </div>
+    <div class="progress-bar-wrap">
+      <div class="progress-bar-fill" id="progress-bar" style="width:0%"></div>
+    </div>
+    <div class="card">
+      <div id="q-text" class="q-text"></div>
+      <div class="options" id="options-list"></div>
+      <div id="feedback-msg" class="feedback-msg"></div>
+      <button class="btn btn-primary" id="next-btn" onclick="window._nextQuestion()" style="display:none;margin-top:20px">
+        Next Question →
+      </button>
+    </div>
+  </div>
+
+  <!-- ========== RESULTS ========== -->
+  <div class="screen" id="screen-results">
+    <div class="card center">
+      <div class="score-circle">
+        <span class="score-num" id="res-score">0</span>
+        <span class="score-denom">/ <span id="res-total">5</span></span>
+      </div>
+      <div class="score-grade" id="res-grade"></div>
+      <button class="btn btn-primary" onclick="window._showScreen('leaderboard')">See Leaderboard →</button>
+      <button class="btn btn-ghost" onclick="window._resetToHome()">Play Again</button>
+    </div>
+  </div>
+
+  <!-- ========== LEADERBOARD ========== -->
+  <div class="screen" id="screen-leaderboard">
+    <div class="nav-row">
+      <h2>Leaderboard</h2>
+      <button class="btn btn-ghost btn-sm" onclick="window._resetToHome()">← Back</button>
+    </div>
+    <div class="card">
+      <div id="lb-list"><p class="muted center">Loading scores...</p></div>
+    </div>
+    <button class="btn btn-ghost spacer" onclick="window._resetToHome()">Play Again</button>
+  </div>
+
+  <!-- ========== ADMIN ========== -->
+  <div class="screen" id="screen-admin">
+    <div class="nav-row">
+      <h2>Edit Questions</h2>
+      <button class="btn btn-ghost btn-sm" onclick="window._resetToHome()">← Done</button>
+    </div>
+    <p class="muted" style="margin-bottom:20px;line-height:1.6">
+      Edit each question and its four answer options. Click <strong style="color:var(--green)">✓</strong> next to the correct answer, then hit Save.
+    </p>
+    <div id="admin-q-list"></div>
+    <div class="save-note" id="save-note">✓ Questions saved to Firebase!</div>
+    <button class="btn btn-primary" onclick="window._saveQuestions()" style="margin-top:4px">Save All Questions</button>
+    <button class="btn btn-danger" onclick="window._clearLeaderboard()" style="margin-top:8px">🗑 Clear Leaderboard</button>
+  </div>
+
+</div>
+</body>
+</html>
